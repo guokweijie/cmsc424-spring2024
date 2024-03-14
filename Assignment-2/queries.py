@@ -91,6 +91,8 @@ select generate_series(50001, 50010), 'Comment ' || generate_series(50001, 50010
 ### Write a single ALTER TABLE command to add a NOT NULL constraint on the "ID" column, add
 ### a foreign key constraint on the "PostId" column, and add a check constraint on the "Score" column (score >= 0).
 ###
+### Link to documentation: https://www.postgresql.org/docs/current/sql-altertable.html
+###
 ### We can't add a primary key constraint any more, because there are duplicate values in the "ID" column now
 ### and those would need to be taken care of manually first.
 ###
@@ -106,7 +108,7 @@ add constraint check_score check (score >= 0);
 ### If there are ties, the two (or more) badges should get the same "rank", and next ranks
 ### should be skipped.
 ###
-### HINT: Use a WITH clause to create a temporary table (temp(PostID, NumBadges)
+### HINT: Use a WITH clause to create a temporary table (temp(UserID, NumBadges)
 ### followed by the appropriate "RANK"
 ### construct -- PostgreSQL has several different
 ### See: https://www.eversql.com/rank-vs-dense_rank-vs-row_number-in-postgresql/, for some
