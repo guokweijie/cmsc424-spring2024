@@ -24,7 +24,10 @@ order by Id asc;
 ### See: https://www.postgresql.org/docs/current/datatype-enum.html if you are
 ### unsure how to use the enum type
 queries[1] = """
-select 0;
+ALTER TABLE CommentsCopy
+ADD COLUMN CommentLength INTEGER,
+ADD COLUMN CommenterDisplayName VARCHAR(40),
+ADD COLUMN lengthFilter LengthFilterType;
 """
 
 ### 2 [0.25]. Write a single query/statement to set the values of the new columns.
@@ -40,14 +43,22 @@ select 0;
 ### https://www.postgresql.org/docs/current/sql-update.html has examples at the
 ### bottom to show how to update multiple columns in the same query
 queries[2] = """
-select 0;
+UPDATE CommentsCopy
+SET CommentLength = LENGTH(text),
+    CommenterDisplayName = (SELECT displayname FROM Users WHERE Users.ID = CommentsCopy.UserId),
+    lengthFilter = CASE
+                        WHEN LENGTH(text) > 100 THEN 'Long'::lengthfiltertype
+                        WHEN LENGTH(text) BETWEEN 50 AND 100 THEN 'Medium'::lengthfiltertype
+                        ELSE 'Short'::lengthfiltertype
+                    END;
+
 """
 
 
 ### 3 [0.25]. Write a query "delete" all Posts from CommentsCopy where the displayname of the user who 
 ### posted it contains the word "nick" (case insensitive).
 queries[3] = """
-select 0;
+DELETE FROM CommentsCopy where commenterdisplayname ILIKE '%nick%';
 """
 
 ### 4 [0.25]. Use "generate_series" to write a single statement to insert 10 new tuples
@@ -63,7 +74,8 @@ select 0;
 ### 
 ### Use `select * from commentscopy where id >= 50001 and id <=50010;` to confirm.
 queries[4] = """
-select 0;
+insert into CommentsCopy (id, text, postid, score, creationdate, userid)
+select generate_series(50001, 50010), 'Comment ' || generate_series(50001, 50010), 2, 0, '2022-10-01'::date + generate_series(0,9), -1;
 """
 
 
@@ -83,7 +95,10 @@ select 0;
 ### and those would need to be taken care of manually first.
 ###
 queries[5] = """
-select 0;
+alter table CommentsCopy
+alter column id set not null,
+add constraint fk_postid foreign key (postid) references posts(id),
+add constraint check_score check (score >= 0);
 """
 
 ### 6 [0.25]. Write a single query to rank the "Users" by the number of badges, with the User
@@ -101,7 +116,14 @@ select 0;
 ### Output Columns: UserID, Rank
 ### Order by: Rank ascending, UserID ascending
 queries[6] = """
-select 0;
+with temp as (
+    select users.id, count(badges.userid) as numbadges
+    from users left join badges on users.id = badges.userid
+    group by users.id
+    )
+select id as UserID, rank() over (order by numbadges desc) as rank
+from temp
+order by rank, id;
 """
 
 
@@ -122,7 +144,10 @@ select 0;
 ###
 ### Ensure that the latter is case (i.e., the query for a single ID runs quickly).
 queries[7] = """
-select 0;
+create view PostsSummary as
+select id, (select count(*) from votes where votes.postid = posts.id) as numvotes,
+            (select count(*) from comments where comments.postid = posts.id) as numcomments
+from posts;
 """
 
 ### 8 [0.25]. Use window functions to construct a query to associate with each post
@@ -158,7 +183,9 @@ with temp as (
         select ID, title, extract(year from CreationDate) as CreatedYear, extract(month from CreationDate) as CreatedMonth, score
         from posts
         )
-select 0;
+select ID, title, CreatedYear, CreatedMonth, score, avg(score) over (partition by CreatedYear, CreatedMonth) as AvgScoreForPostsFromThatMonth
+from temp
+order by CreatedYear, CreatedMonth, ID;
 """
 
 ### 9 [0.25]. Write a function that takes in the ID of a Post as input, and returns the
@@ -178,7 +205,13 @@ select 0;
 ### will be very slow given the number of posts.
 ###
 queries[9] = """
-select 0;
+CREATE OR REPLACE FUNCTION NumVotes(IN post_id INTEGER, OUT NumVotes BIGINT)
+RETURNS BIGINT
+AS $$
+    SELECT COUNT(*)
+    FROM votes
+    WHERE postid = post_id;
+$$ LANGUAGE SQL;
 """
 
 ### 10 [0.5]. Write a function that takes in an Userid as input, and returns a JSON string with 
@@ -188,7 +221,7 @@ select 0;
 ### should return a single tuple with a single attribute of type string/varchar as:
 ###  { "userid": 7,
 ###    "displayname": "Toby",
-###   "osts": [ {"title": "How can a group track database schema changes?", "score": 68, "creationdate": "2011-01-03"},
+###   "posts": [ {"title": "How can a group track database schema changes?", "score": 68, "creationdate": "2011-01-03"},
 ###                {"title": "", "score": 15, "creationdate": "2011-01-03"},
 ###                {"title": "Confirm that my.cnf file has loaded OK", "score": 4, "creationdate": "2011-01-19"}
 ###    ]}
@@ -210,7 +243,22 @@ select 0;
 ### 
 ### Confirm that: 'select userposts(7);' returns the result above.
 queries[10] = """
-select 0;
+create or replace function UserPosts(in input integer, out PostsJSON varchar)
+returns varchar as $$
+begin
+    select format('{"userid": %s, "displayname": "%s", "posts": [%s]}', u.id, u.displayname,
+    coalesce(string_agg(
+        case
+            when p.title is null then '{"title": "", "score": ' || p.score || ', "creationdate": "' || p.creationdate || '"}'
+            else ' {"title": "' || p.title || '", "score": ' || p.score || ', "creationdate": "' || p.creationdate || '"}'
+        end, ','), '')) into PostsJSON
+    from users u
+    left join posts p on p.owneruserid = u.id
+    where u.id = input
+    group by u.id, u.displayname;
+end
+$$ language plpgsql;
+
 """
 
 ### 11/12 [0.5]. Create a new table using:
@@ -246,28 +294,51 @@ select 0;
 ### The trigger should also be named: UpdateStarUsers
 queries[11] = """
 CREATE OR REPLACE FUNCTION UpdateStarUsers()
-    RETURNS TRIGGER
-    LANGUAGE PLPGSQL
-    AS
-    $$
-    declare 
-        cnt integer;
-    BEGIN
-        if TG_OP = 'DELETE' then
-            select 0;
-        elseif TG_OP = 'INSERT' then
-            select 0;
-        elseif TG_OP = 'UPDATE' then
-            select 0;
+RETURNS TRIGGER
+AS $$
+declare 
+    cnt integer;
+BEGIN
+    if TG_OP = 'DELETE' then
+        select count(*) into cnt from badges where userid = OLD.userid;
+        if cnt < 11 then
+            delete from starusers where id = OLD.userid;
+        else
+            update starusers set numbadges = numbadges - 1 where id = OLD.userid;
         end if;
-        RETURN NULL;
-    END
-    $$;
+    elsif TG_OP = 'INSERT' then
+        select count(*) into cnt from badges where userid = NEW.userid;
+        if cnt = 11 then
+            insert into starusers values (NEW.userid, 11);
+        elsif cnt > 11 then
+            update starusers set numbadges = numbadges + 1 where id = NEW.userid;
+        end if;
+    elsif TG_OP = 'UPDATE' then
+        if OLD.userid <> NEW.userid then
+            update starusers set numbadges = numbadges - 1 where id = OLD.userid;
+            delete from starusers where id = OLD.userid and numbadges < 11;
+            select count(*) into cnt from badges where userid = new.userid;
+            if new.userid in (select id from starusers) then
+                update starusers set numbadges = numbadges + 1 where id = new.userid;
+            else
+                if cnt >= 11 then
+                    insert into starusers values (new.userid, cnt);
+                end if;
+            end if;
+        end if;
+    end if;
+    RETURN NULL;
+END;
+$$ language plpgsql;
+
 select 0;
 """
 
 queries[12] = """
-select 0;
+create trigger UpdateStarUsers
+after insert or delete or update on badges
+for each row
+execute function UpdateStarUsers();
 """
 
 ### 13 [0.25]. The goal here is to write a query to find the total view count of posts for each
@@ -286,7 +357,14 @@ select 0;
 ### Three functions to make this easier: left(), right(), and unnest()
 ### 
 queries[13] = """
-select 0;
+with temp as (
+    select unnest(string_to_array(substring(tags, 2, length(tags)-2), '><')) as tag, id as postid, viewcount
+    from posts
+    )
+select tag, sum(viewcount) as TotalViewCounts
+from temp
+group by tag
+order by TotalViewCounts desc;
 """
 
 
@@ -305,5 +383,15 @@ select 0;
 ### The output should be a table with two columns: parent, ct
 ### Order by: parent
 queries[14] = """
-select 0;
+with recursive temp as (
+    select parent, child
+    from answered
+    union
+    select temp.parent, a.child
+    from answered a join temp on temp.child = a.parent
+)
+select parent, count(child) as ct
+from temp
+group by parent
+order by parent;
 """
