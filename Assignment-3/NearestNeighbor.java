@@ -83,6 +83,8 @@ public class NearestNeighbor
                     }
                 }
 			}
+
+			connection.commit();
 			
 		} catch (SQLException e ) {
 			System.out.println(e);
